@@ -1,5 +1,6 @@
-import sqlite3
-import sqlite_vector
+import apsw  # или from pysqlite3 import dbapi2 as sqlite3
+import sqlite_vec
+from array import array
 
 def create_table_query():
     return """
@@ -10,27 +11,56 @@ def create_table_query():
     )
     """
 
+def to_f32_blob(vec: list[float]) -> bytes:
+    # проверим размер (опционально)
+    if len(vec) != 1536:
+        raise ValueError(f"Embedding must have 1536 dims, got {len(vec)}")
+    return array('f', vec).tobytes()  # float32 → bytes
+
 class Database:
-    conn:sqlite3.Connection = None
+    conn = None
 
     def __init__(self, db_path="symptoms.db"):
-        self.conn = sqlite3.connect(db_path)
-        sqlite_vector.load(self.conn)
-        
-    def add_vector(self, name:str, vector:list[float]):
-        cursor = self.conn.cursor()
-        cursor.execute("INSERT INTO items (name, embedding) VALUES (?, ?)", (name, vector))
-        self.conn.commit()
-        cursor.close()
+        self.conn = apsw.Connection(db_path)
+        if hasattr(self.conn, "enableloadextension"):
+            self.conn.enableloadextension(True)
+        elif hasattr(self.conn, "enable_load_extension"):
+            self.conn.enable_load_extension(True)
 
-    def find_closest(self, vector:list[float], limit=5):
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT id, name, embedding <-> ? AS distance FROM items ORDER BY distance LIMIT ?", (vector, limit))
-        results = cursor.fetchall()
-        cursor.close()
-        return results
+        sqlite_vec.load(self.conn)
+
+        cur = self.conn.cursor()
+        cur.execute(create_table_query())
+        cur.close()
+
+    def add_vector(self, name: str, vector: list[float]):
+        blob = to_f32_blob(vector)
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO items (name, embedding) VALUES (?, ?)",
+            (name, blob),
+        )
+        cur.close()
+
+    def find_closest(self, vector: list[float], limit=5):
+        blob = to_f32_blob(vector)  # float32 -> bytes
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT id,
+                   name,
+                   vec_distance_L2(embedding, ?) AS distance
+            FROM items
+            ORDER BY distance LIMIT ?
+            """,
+            (blob, int(limit)),
+        )
+        rows = list(cur)
+        cur.close()
+        return rows
 
     def close(self):
         if self.conn:
             self.conn.close()
             self.conn = None
+

@@ -1,3 +1,8 @@
+aiogram~=3.22.0
+aioredis~=2.0.1
+dotenv~=0.9.9
+openai~=2.2.0
+pytest~=8.4.2
 certifi==2025.10.5
 charset-normalizer==3.4.3
 greenlet==3.2.4
