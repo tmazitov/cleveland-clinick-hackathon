@@ -7,7 +7,8 @@ def create_table_query():
     CREATE TABLE IF NOT EXISTS items (
         id INTEGER PRIMARY KEY,
         name TEXT,
-        embedding VECTOR(1536)
+        embedding VECTOR(1536),
+        uuid TEXT
     )
     """
 
@@ -33,12 +34,12 @@ class Database:
         cur.execute(create_table_query())
         cur.close()
 
-    def add_vector(self, name: str, vector: list[float]):
+    def add_vector(self, name: str, vector: list[float], uuid: str):
         blob = to_f32_blob(vector)
         cur = self.conn.cursor()
         cur.execute(
-            "INSERT INTO items (name, embedding) VALUES (?, ?)",
-            (name, blob),
+            "INSERT INTO items (name, embedding, uuid) VALUES (?, ?, ?)",
+            (name, blob, uuid),
         )
         cur.close()
 
@@ -49,6 +50,7 @@ class Database:
             """
             SELECT id,
                    name,
+                   uuid,
                    vec_distance_L2(embedding, ?) AS distance
             FROM items
             ORDER BY distance LIMIT ?
