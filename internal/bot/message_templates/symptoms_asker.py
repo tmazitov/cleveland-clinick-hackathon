@@ -17,6 +17,8 @@ from internal.bot.fsm_machine.user_cls import UserState
 from internal.services.cache.redis_manager import RedisManager
 from internal.requester.requester import Requester
 from internal.result import Result
+import html
+from aiogram.enums import ParseMode
 
 class SymptomsAsker:
     def __init__(self, redis_client: RedisManager, bot: Bot, openai_client: openai.OpenAI, res_inst: Result):
@@ -65,6 +67,50 @@ class SymptomsAsker:
             kb.adjust(3)
             return kb.as_markup()
 
+        TG_LIMIT = 4096
+
+        def format_assessment_en(data: dict) -> str:
+            diagnoses = data.get("diagnoses") or []
+            recommendations = (data.get("recommendations") or "").strip()
+
+            parts = []
+            if diagnoses:
+                diag_lines = "\n".join(f"• {html.escape(d)}" for d in diagnoses)
+                parts.append(f"<b>Possible causes</b>:\n{diag_lines}")
+
+            if recommendations:
+                # текст уже на английском — просто экранируем
+                parts.append(f"<b>Recommendations</b>:\n{html.escape(recommendations)}")
+
+            return "\n\n".join(parts).strip()
+
+        def split_by_limit(text: str, limit: int = TG_LIMIT):
+            if len(text) <= limit:
+                return [text]
+            chunks, cur = [], []
+            cur_len = 0
+            for line in text.split("\n"):
+                add = (line + "\n")
+                if cur_len + len(add) > limit:
+                    chunks.append("".join(cur).rstrip("\n"))
+                    cur, cur_len = [add], len(add)
+                else:
+                    cur.append(add);
+                    cur_len += len(add)
+            if cur:
+                chunks.append("".join(cur).rstrip("\n"))
+            return chunks
+
+        async def send_assessment_en(bot, chat_id: int, parsed: dict):
+            text = format_assessment_en(parsed)
+            for chunk in split_by_limit(text):
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
+
 
         @self.rt.callback_query(F.data.endswith(":yes"))
         async def add_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
@@ -79,35 +125,17 @@ class SymptomsAsker:
                 user_answers = answers_to_json(user_answers)
                 last_parse = Parser()
                 parsed = last_parse.parse(requester.send(user_request=user_answers))
-
+                print(parsed)
+                # await callback_query.message.answer(text=)
+                await send_assessment_en(bot, callback_query.from_user.id, parsed)
                 doctors:list[Doctor] = await self.res_inst.find_doctors(parsed["diagnoses"], user_id=callback_query.from_user.id)
-
-                if doctors is None or len(doctors) == 0:
-                    await callback_query.message.answer(text="Sorry, I couldn't find any doctors for your symptoms. Please try again later or contact support.")
-                    return
-
-                prepared_text = "Based on your symptoms, here are some doctors you can consider:\n"
-                await callback_query.message.answer(text=prepared_text)
-
-                for doc in doctors:
-                    doc_info = f"""
-                    {doc.image}
-                    👨‍⚕️ Name: {doc.name}
-                    🩺 Specialty: {doc.role}
-                    """
-                    await callback_query.message.answer(text=doc_info)
-
-                    # Create a keyboard with a link button
-                    kb = InlineKeyboardBuilder()
-                    kb.add(InlineKeyboardButton(text="View Profile", url=doc.link))
-
-
-                    await callback_query.message.answer(text=doc_info, reply_markup=kb.as_markup())
+                from internal.bot.message_templates.post_handler import PostHandler
+                post_handler = PostHandler(bot=self.bot)
+                await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
                 return
             self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id, symptom_key=questions_list[current_question],
                                                 user_choose="yes")
             await state.update_data(current_question=str(current_question))
-            prev_message_id = data["message_id"]
             await callback_query.message.edit_text(text=f"{questions_list[current_question]}", reply_markup=_qa_keyboard(current_question))
 
         @self.rt.callback_query(F.data.endswith(":no"))
