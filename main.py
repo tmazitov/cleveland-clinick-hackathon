@@ -10,7 +10,7 @@ from settings import OPENAI_API_KEY
 from internal.bot.handlers.img_handler import ImgHandler
 from internal.bot.handlers.voice_handler import VoiceHandler
 from internal.bot.message_templates.commands import rt as commands_rt
-from internal.bot.message_templates.symptoms_asker import rt as symptoms_asker_rt
+from internal.bot.message_templates.symptoms_asker import SymptomsAsker
 from internal.bot.fsm_machine.fsm_handler import FSMHandler
 from internal.services.cache.redis_manager import RedisManager
 from openai import OpenAI
@@ -35,7 +35,8 @@ async def main() -> None:
     img_handler = ImgHandler(bot=bot)
     voice_handler = VoiceHandler(bot=bot)
     FSM_handler = FSMHandler(redis_client=redis_client, openai_client=openai_client)
-    dp.include_routers(commands_rt, img_handler.rt, voice_handler.rt, symptoms_asker_rt, FSM_handler.rt)
+    symptoms_asker = SymptomsAsker(redis_client=redis_client, bot=bot)
+    dp.include_routers(commands_rt, img_handler.rt, voice_handler.rt, symptoms_asker.rt, FSM_handler.rt)
     await dp.start_polling(bot)
 
 if __name__ == '__main__':

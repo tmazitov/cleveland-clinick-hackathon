@@ -14,11 +14,11 @@ class FSMHandler:
         self.openai_client = openai_client
         self.rt = Router()
 
-        def qa_keyboard() -> types.InlineKeyboardMarkup:
+        def _qa_keyboard(symptom: str) -> types.InlineKeyboardMarkup:
             kb = InlineKeyboardBuilder()
-            kb.button(text="yes", callback_data="qa:yes")
-            kb.button(text="no", callback_data="qa:no")
-            kb.button(text="IDK", callback_data="qa:idk")
+            kb.button(text="yes", callback_data=f"{symptom}:yes")
+            kb.button(text="no", callback_data=f"{symptom}:no")
+            kb.button(text="IDK", callback_data=f"{symptom}:idk")
             kb.adjust(3)
             return kb.as_markup()
 
@@ -26,20 +26,23 @@ class FSMHandler:
         async def handle_explained_sympthom(message: types.Message, state: FSMContext) -> None:
             parser = Parser()
             requester = Requester(client=self.openai_client)
-            text = "Okay, let me check your situation and ask couple of additional questions."
+            text = "Okay!\nLet me check your situation and ask couple of additional questions..."
             self.redis_client.set_user_explained(user_id=message.from_user.id, explained=message.text)
             await message.answer(text=text)
+            await state.clear()
             questions = parser.parse(requester.send(user_request=message.text))
-            x = 0
             questions_list = questions.get("questions", [])
-            print(questions_list)
             if not questions_list:
                 await message.answer("Need more information from you!")
                 return
-            for question in questions["questions"]:
-                bt_yes = InlineKeyboardButton(text="yes", callback_data=f"{x}_yes")
-                bt_no = InlineKeyboardButton(text="no", callback_data=f"{x}_no")
-                bt_idk = InlineKeyboardButton(text="idk", callback_data=f"{x}_idk")
-                kb = InlineKeyboardBuilder()
-                kb.add(bt_yes, bt_no, bt_idk)
-                await message.answer(text=question, reply_markup=kb.as_markup())
+            await state.update_data(questions=questions_list)
+            await state.update_data(current_question=str(0))
+            sent = await message.answer(f"{questions_list[0]}", reply_markup=_qa_keyboard(0))
+            await state.update_data(message_id=sent.message_id)
+            # for question in questions["questions"]:
+            #     bt_yes = InlineKeyboardButton(text="yes", callback_data=f"{x}_yes")
+            #     bt_no = InlineKeyboardButton(text="no", callback_data=f"{x}_no")
+            #     bt_idk = InlineKeyboardButton(text="idk", callback_data=f"{x}_idk")
+            #     kb = InlineKeyboardBuilder()
+            #     kb.add(bt_yes, bt_no, bt_idk)
+            #     await message.answer(text=question, reply_markup=kb.as_markup())
