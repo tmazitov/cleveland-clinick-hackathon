@@ -1,19 +1,13 @@
-from csv import DictReader
-
-import aiogram
-from aiogram import types, Bot, Dispatcher
+from asyncio import run
+from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-import dotenv
-import logging
 from typing import Dict, Any, List, Optional
 
-logging.basicConfig(level=logging.INFO)
-BOT_API_KEY = dotenv.get_key(dotenv_path='.env', key_to_get='BOT_API_KEY')
-bot = Bot(token=BOT_API_KEY)
+from settings import BOT_API_KEY
+from internal.bot.handlers.img_handler import ImgHandler
+from internal.bot.handlers.voice_handler import VoiceHandler
+from internal.bot.message_templates.commands import rt as commands_dp
 
-dp = Dispatcher()
-
-hash_map: Dict[str, str] = {}
 
 """
                 USERID
@@ -23,18 +17,19 @@ hash_map: Dict[str, str] = {}
 """
 
 #Importing handlers
-from message_templates.commands import rt as commands_dp
-from content_handler.img_handler import ImgHandler
-from content_handler.voice_handler import VoiceHandler
-
-img_handler = ImgHandler(bot=bot)
-voice_handler = VoiceHandler(bot=bot)
-
-dp.include_routers(commands_dp, img_handler.rt, voice_handler.rt)
 
 async def main() -> None:
+    bot = Bot(token=BOT_API_KEY)
+
+    dp = Dispatcher()
+
+    hash_map: Dict[str, str] = {}
+
+    img_handler = ImgHandler(bot=bot)
+    voice_handler = VoiceHandler(bot=bot)
+
+    dp.include_routers(commands_dp, img_handler.rt, voice_handler.rt)
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    run(main())
