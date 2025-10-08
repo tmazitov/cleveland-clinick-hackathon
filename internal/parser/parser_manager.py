@@ -93,11 +93,26 @@ class Parser:
         }
         Любые отсутствующие поля — None.
         """
+        # try:
+        #     text = data if isinstance(data, str) else str(data)
+        #     urgency = self._parse_urgency(text)
+        #     diagnoses = self._parse_diagnoses(text)
+        #     questions = self._parse_questions(text)
+        #     recommendations = self._parse_recommendations(text)
+        #
+        #     return {
+        #         "urgency": urgency,
+        #         "diagnoses": diagnoses,
+        #         "recommendations": recommendations,
+        #         "questions": questions
+        #     }
         try:
             text = data if isinstance(data, str) else str(data)
             urgency = self._parse_urgency(text)
             diagnoses = self._parse_diagnoses(text)
             questions = self._parse_questions(text)
+            if questions:
+                questions = questions[:7]  # <= жестко режем до 7
             recommendations = self._parse_recommendations(text)
 
             return {
