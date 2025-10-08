@@ -1,45 +1,47 @@
-from playwright.sync_api import sync_playwright
-from playwright.sync_api import Browser
 from .doctor import Doctor
+from playwright.async_api import async_playwright
 
-def wait_update(page):
-    page.wait_for_timeout(1500)  # Ждём 2 секунды чтобы контент точно прогрузился
+pt = None
+browser = None
 
-class DoctorsProvider:
-    
-    browser: Browser
+async def setup_scrapper():
+    global pt, browser
+    pt = await async_playwright().start()
+    browser = await pt.chromium.launch(headless=True)
 
-    def __init__(self):
-        self.pl = sync_playwright().start()
-        self.browser = self.pl.chromium.launch(headless=True)
+async def close_scrapper():
+    global pt, browser
+    await browser.close()
+    await pt.stop()
 
-    def get_doctors(self, symptomUUID: str) -> list[Doctor]:
-        if not symptomUUID or len(symptomUUID) == 0:
-            return []
+async def get_doctors(symptomUUID: str) -> list[Doctor]:
+    if not symptomUUID:
+        return []
 
-        page = self.browser.new_page()
-        page.goto(f"https://www.clevelandclinicabudhabi.ae/en/find-a-doctor?bySymptoms={symptomUUID}")
-        wait_update(page)
+    page = await browser.new_page()
+    await page.goto(f"https://www.clevelandclinicabudhabi.ae/en/find-a-doctor?bySymptoms={symptomUUID}")
+    await page.wait_for_timeout(2000)
 
-        doctors_elements = page.query_selector_all(".DoctorSliderItem")
-        if not doctors_elements or len(doctors_elements) == 0:
-            return []
-        
-        return [
-            Doctor({
-                "name" : elem.query_selector(".DoctorName").inner_text(),
-                "role" : elem.query_selector(".DoctorRole").inner_text(),
-                "link" : elem.query_selector('a').get_attribute('href'),
-                "image" : elem.query_selector(".DoctorImg").query_selector('img').get_attribute('data-src'),
-                # "image" : print("image", elem.query_selector(".DoctorImg").inner_html()),
+    doctors_elements = await page.query_selector_all(".DoctorSliderItem")
+    if not doctors_elements:
+        print("info : no doctors")
+        return []
+
+    doctors = []
+    for elem in doctors_elements:
+        if (
+                await elem.query_selector(".ProfileButtonArea") is not None and
+                await elem.query_selector(".DoctorImg") is not None and
+                await elem.query_selector(".btn-general.btn-blue") is not None and
+                await( await elem.query_selector(".btn-general.btn-blue")).get_attribute("style") is None
+        ):
+            doctor = Doctor({
+                "name": await (await elem.query_selector(".DoctorName")).inner_text(),
+                "role": await (await elem.query_selector(".DoctorRole")).inner_text(),
+                "link": await (await elem.query_selector('a')).get_attribute('href'),
+                "image": await (
+                    await (await elem.query_selector(".DoctorImg")).query_selector('img')).get_attribute(
+                    'data-src'),
             })
-            for elem in doctors_elements 
-            if elem.query_selector(".ProfileButtonArea") != None
-                and elem.query_selector(".DoctorImg") != None
-                and elem.query_selector(".btn-general.btn-blue") != None
-                and elem.query_selector(".btn-general.btn-blue").get_attribute("style") == None
-        ]
-
-    def close(self) -> None:
-        self.browser.close()
-        self.pl.stop()
+            doctors.append(doctor)
+    return doctors

@@ -1,6 +1,7 @@
 import apsw  # или from pysqlite3 import dbapi2 as sqlite3
 import sqlite_vec
 from array import array
+from typing import List, Dict
 
 def create_table_query():
     return """
@@ -43,7 +44,7 @@ class Database:
         )
         cur.close()
 
-    def find_closest(self, vector: list[float], limit=5):
+    def find_closest(self, vector: list[float], limit=1):
         blob = to_f32_blob(vector)  # float32 -> bytes
         cur = self.conn.cursor()
         cur.execute(
@@ -65,4 +66,3 @@ class Database:
         if self.conn:
             self.conn.close()
             self.conn = None
-

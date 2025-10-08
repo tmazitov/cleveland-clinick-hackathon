@@ -4,7 +4,7 @@ import logging
 class RedisManager:
     def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0, password: str = "", username: str = "") -> None:
         try:
-            self.redis = Redis(host=host, port=port, db=db, password=password, username=username)
+            self.redis = Redis(host=host, port=port, db=db, password=password, username=username, decode_responses=True)
         except Exception as e:
             logging.error(e)
             pass
@@ -32,7 +32,8 @@ class RedisManager:
 
     def delete_user_if_exists(self, user_id: int) -> None:
         try:
-            self.redis.hdel(name=str(user_id))
+            # self.redis.hdel(name=str(user_id), "explained_symptom")
+            self.redis.delete(str(user_id))
         except Exception as e:
             logging.error(e)
             pass

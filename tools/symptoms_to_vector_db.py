@@ -14,18 +14,18 @@ KEY = dotenv.get_key(dotenv_path=f'{parent_folder_path}/.env', key_to_get='OPENA
 client = openai.OpenAI(api_key=KEY)
 db_client = Database(f"{parent_folder_path}/symptoms.db")
 
-with open(f'{parent_folder_path}/tools/symptoms.json', 'r') as f:
-    symptoms = json.load(f)
-    counter = 0
-    for symptom in symptoms:
-        name = symptom['name']
-        value = symptom['value']
-        # embedding_vector = embedding(name, client)
-        # db_client.add_vector(name=name, vector=embedding_vector, uuid=value)
-        counter += 1
-        print(f"Added {counter}: {name} - {value}")
-
-db_client.close()
+# with open(f'{parent_folder_path}/tools/symptoms.json', 'r') as f:
+#     symptoms = json.load(f)
+#     counter = 0
+#     for symptom in symptoms:
+#         name = symptom['name']
+#         value = symptom['value']
+#         # embedding_vector = embedding(name, client)
+#         # db_client.add_vector(name=name, vector=embedding_vector, uuid=value)
+#         counter += 1
+#         print(f"Added {counter}: {name} - {value}")
+#
+# db_client.close()
 
 
 
