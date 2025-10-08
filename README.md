@@ -7,7 +7,7 @@ This project serves as a Telegram Bot that is aimed to enhance patients' experie
 ## Collaborators
 
 * [Timur Mazitov](https://github.com/tmazitov)
-* [Igor Mike](https://github.com/IqMent)
+* [Igor Mile](https://github.com/IqMent)
 
 ## Tech Stack
 
