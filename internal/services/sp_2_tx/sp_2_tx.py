@@ -1,6 +1,10 @@
 import openai
 from openai import OpenAI
 
+import asyncio
+from pathlib import Path
+from aiogram import types
+
 class SpeechToText:
     def __init__(self, client: OpenAI):
         self.client = client

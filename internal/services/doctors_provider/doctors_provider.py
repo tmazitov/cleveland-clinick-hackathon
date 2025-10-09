@@ -5,26 +5,58 @@ pt = None
 browser = None
 
 async def setup_scrapper():
-    global pt, browser
+    global pt, browser, context
     pt = await async_playwright().start()
-    browser = await pt.chromium.launch(headless=True)
+    browser = await pt.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+    context = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        locale="en-US",
+        timezone_id="Asia/Dubai",
+        viewport={"width": 1366, "height": 900},
+    )
+
+    await context.route("**/*", lambda r: (
+        r.abort() if r.request.resource_type in {"image", "font", "media"} else r.continue_()
+    ))
 
 async def close_scrapper():
-    global pt, browser
+    global pt, browser, context
     await browser.close()
     await pt.stop()
 
-async def get_doctors(symptomUUID: str) -> list[Doctor]:
+async def get_doctors(symptomUUID: str, retry: bool = False) -> list[Doctor]:
     if not symptomUUID:
         return []
 
-    page = await browser.new_page()
-    await page.goto(f"https://www.clevelandclinicabudhabi.ae/en/find-a-doctor?bySymptoms={symptomUUID}")
-    await page.wait_for_timeout(2000)
+    page = await context.new_page()
+
+    try:
+        response = await page.goto(f"https://www.clevelandclinicabudhabi.ae/en/find-a-doctor?bySymptoms={symptomUUID}", timeout=10000)
+        if response.status >= 400:
+            print(f"error: bad response status code {response.status}, retrying...")
+            await page.close()
+            if not retry:
+                return await get_doctors(symptomUUID, retry=True)
+            return []
+        await page.wait_for_timeout(2000)
+    except TimeoutError:
+        print("error: timeout error, retrying...")
+        await page.close()
+        if not retry:
+            return []
+        return await get_doctors(symptomUUID, retry=True)
+    except Exception as e:
+        print("error: unknown error:", e)
+        await page.close()
+        if not retry:
+            return []
+        return await get_doctors(symptomUUID, retry=True)
 
     doctors_elements = await page.query_selector_all(".DoctorSliderItem")
     if not doctors_elements:
         print("info : no doctors")
+        await page.close()
         return []
 
     doctors = []
@@ -44,4 +76,5 @@ async def get_doctors(symptomUUID: str) -> list[Doctor]:
                     'data-src'),
             })
             doctors.append(doctor)
+    await page.close()
     return doctors

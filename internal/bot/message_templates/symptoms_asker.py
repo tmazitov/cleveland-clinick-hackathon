@@ -2,6 +2,7 @@ import sys
 
 import openai
 
+
 from internal.services.doctors_provider.doctor import Doctor
 
 # from internal.services.doctors_provider.doctors_provider import DoctorsProvider
@@ -19,6 +20,9 @@ from internal.requester.requester import Requester
 from internal.result import Result
 import html
 from aiogram.enums import ParseMode
+from internal.bot.waiting import WaitDots
+from internal.bot.message_templates.post_handler import PostHandler
+import asyncio
 
 class SymptomsAsker:
     def __init__(self, redis_client: RedisManager, bot: Bot, openai_client: openai.OpenAI, res_inst: Result):
@@ -39,9 +43,6 @@ class SymptomsAsker:
 
         @self.rt.callback_query(F.data == 'check_symptoms')
         async def ask_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
-            # kb = InlineKeyboardBuilder()
-            # bt = InlineKeyboardButton(text="Ask for symptoms", callback_data='ask_symptoms')
-            # kb.add(bt)
             text = "Explain your symptoms below in one message, you can make voice message!"
             await state.set_state(UserState.symptoms)
             await state.update_data(user_id=callback_query.from_user.id)
@@ -79,7 +80,6 @@ class SymptomsAsker:
                 parts.append(f"<b>Possible causes</b>:\n{diag_lines}")
 
             if recommendations:
-                # текст уже на английском — просто экранируем
                 parts.append(f"<b>Recommendations</b>:\n{html.escape(recommendations)}")
 
             return "\n\n".join(parts).strip()
@@ -112,62 +112,193 @@ class SymptomsAsker:
                 )
 
 
+        # @self.rt.callback_query(F.data.endswith(":yes"))
+        # async def add_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
+        #     data = await state.get_data()
+        #     questions_list = data["questions"]
+        #     current_question = data["current_question"]
+        #     current_question = int(current_question) + 1
+        #     # if (current_question >= len(questions_list)):
+        #     #     await callback_query.message.edit_text(text="Wait please...")
+        #     #     user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
+        #     #     requester = Requester(client=self.openai_client)
+        #     #     user_answers = answers_to_json(user_answers)
+        #     #     last_parse = Parser()
+        #     #     parsed = last_parse.parse(requester.send(user_request=user_answers))
+        #     #     await send_assessment_en(bot, callback_query.from_user.id, parsed)
+        #     #     doctors:list[Doctor] = await self.res_inst.find_doctors(parsed["diagnoses"], user_id=callback_query.from_user.id)
+        #     #     from internal.bot.message_templates.post_handler import PostHandler
+        #     #     post_handler = PostHandler(bot=self.bot)
+        #     #     await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
+        #     #     return
+        #     if current_question >= len(questions_list):
+        #         async with WaitDots(self.bot, callback_query.from_user.id, "Wait please"):
+        #             user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
+        #             requester = Requester(client=self.openai_client)
+        #             user_answers = answers_to_json(user_answers)
+        #             last_parse = Parser()
+        #             parsed = last_parse.parse(requester.send(user_request=user_answers))
+        #
+        #             await send_assessment_en(self.bot, callback_query.from_user.id, parsed)
+        #
+        #             doctors: list[Doctor] = await self.res_inst.find_doctors(
+        #                 parsed["diagnoses"], user_id=callback_query.from_user.id
+        #             )
+        #             post_handler = PostHandler(bot=self.bot)
+        #             await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
+        #
+        #         return
+        #     self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id, symptom_key=questions_list[current_question],
+        #                                         user_choose="yes")
+        #     await state.update_data(current_question=str(current_question))
+        #     await callback_query.message.edit_text(text=f"{questions_list[current_question]}", reply_markup=_qa_keyboard(current_question))
+
         @self.rt.callback_query(F.data.endswith(":yes"))
         async def add_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
+            await callback_query.answer()
+
             data = await state.get_data()
             questions_list = data["questions"]
-            current_question = data["current_question"]
-            current_question = int(current_question) + 1
-            if (current_question >= len(questions_list)):
-                await callback_query.message.edit_text(text="Wait please...")
-                user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
-                requester = Requester(client=self.openai_client)
-                user_answers = answers_to_json(user_answers)
-                last_parse = Parser()
-                parsed = last_parse.parse(requester.send(user_request=user_answers))
-                print(parsed)
-                # await callback_query.message.answer(text=)
-                await send_assessment_en(bot, callback_query.from_user.id, parsed)
-                doctors:list[Doctor] = await self.res_inst.find_doctors(parsed["diagnoses"], user_id=callback_query.from_user.id)
-                from internal.bot.message_templates.post_handler import PostHandler
-                post_handler = PostHandler(bot=self.bot)
-                await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
+            current_question = int(data["current_question"]) + 1
+
+            if current_question >= len(questions_list):
+                async with WaitDots(self.bot, callback_query.from_user.id, "Wait please"):
+                    def _compute():
+                        user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
+                        ua_json = answers_to_json(user_answers)
+                        req = Requester(client=self.openai_client)
+                        parser = Parser()
+                        parsed_local = parser.parse(req.send(user_request=ua_json))
+                        print(parsed_local)
+                        return parsed_local
+
+                    parsed = await asyncio.to_thread(_compute)
+
+                    await send_assessment_en(self.bot, callback_query.from_user.id, parsed)
+                    doctors: list[Doctor] = await self.res_inst.find_doctors(
+                        parsed["diagnoses"], user_id=callback_query.from_user.id
+                    )
+
+                    post_handler = PostHandler(bot=self.bot)
+                    await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
                 return
-            self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id, symptom_key=questions_list[current_question],
-                                                user_choose="yes")
+
+            self.redis_client.set_user_symptoms(
+                user_id=callback_query.from_user.id,
+                symptom_key=questions_list[current_question],
+                user_choose="yes"
+            )
             await state.update_data(current_question=str(current_question))
-            await callback_query.message.edit_text(text=f"{questions_list[current_question]}", reply_markup=_qa_keyboard(current_question))
+            await callback_query.message.edit_text(
+                text=f"{questions_list[current_question]}",
+                reply_markup=_qa_keyboard(current_question)
+            )
 
         @self.rt.callback_query(F.data.endswith(":no"))
         async def add_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
+            # data = await state.get_data()
+            # questions_list = data["questions"]
+            # current_question = data["current_question"]
+            # current_question = int(current_question) + 1
+            # if (current_question >= len(questions_list)):
+            #     await callback_query.message.edit_text(text="Wait please...")
+            #     return
+            # self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id,
+            #                                     symptom_key=questions_list[current_question],
+            #                                     user_choose="no")
+            # await state.update_data(current_question=str(current_question))
+            # await callback_query.message.edit_text(text=f"{questions_list[current_question]}",
+            #                                        reply_markup=_qa_keyboard(current_question))
+            await callback_query.answer()
+
             data = await state.get_data()
             questions_list = data["questions"]
-            current_question = data["current_question"]
-            current_question = int(current_question) + 1
-            if (current_question >= len(questions_list)):
-                await callback_query.message.edit_text(text="Wait please...")
+            current_question = int(data["current_question"]) + 1
+
+            if current_question >= len(questions_list):
+                async with WaitDots(self.bot, callback_query.from_user.id, "Wait please"):
+                    def _compute():
+                        user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
+                        ua_json = answers_to_json(user_answers)
+                        req = Requester(client=self.openai_client)
+                        parser = Parser()
+                        parsed_local = parser.parse(req.send(user_request=ua_json))
+                        print(parsed_local)
+                        return parsed_local
+
+                    parsed = await asyncio.to_thread(_compute)
+
+                    await send_assessment_en(self.bot, callback_query.from_user.id, parsed)
+                    doctors: list[Doctor] = await self.res_inst.find_doctors(
+                        parsed["diagnoses"], user_id=callback_query.from_user.id
+                    )
+
+                    post_handler = PostHandler(bot=self.bot)
+                    await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
                 return
-            self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id,
-                                                symptom_key=questions_list[current_question],
-                                                user_choose="no")
+
+            self.redis_client.set_user_symptoms(
+                user_id=callback_query.from_user.id,
+                symptom_key=questions_list[current_question],
+                user_choose="no"
+            )
             await state.update_data(current_question=str(current_question))
-            prev_message_id = data["message_id"]
-            await callback_query.message.edit_text(text=f"{questions_list[current_question]}",
-                                                   reply_markup=_qa_keyboard(current_question))
+            await callback_query.message.edit_text(
+                text=f"{questions_list[current_question]}",
+                reply_markup=_qa_keyboard(current_question)
+            )
 
         @self.rt.callback_query(F.data.endswith(":idk"))
         async def add_symptoms(callback_query: types.CallbackQuery, state: FSMContext) -> None:
+            # data = await state.get_data()
+            # questions_list = data["questions"]
+            # current_question = data["current_question"]
+            # current_question = int(current_question) + 1
+            # if (current_question >= len(questions_list)):
+            #     await callback_query.message.edit_text(text="Wait please...")
+            #     return
+            # self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id,
+            #                                     symptom_key=questions_list[current_question],
+            #                                     user_choose="idk")
+            # await state.update_data(current_question=str(current_question))
+            # prev_message_id = data["message_id"]
+            # await callback_query.message.edit_text(text=f"{questions_list[current_question]}",
+            #                                        reply_markup=_qa_keyboard(current_question))
+            await callback_query.answer()
+
             data = await state.get_data()
             questions_list = data["questions"]
-            current_question = data["current_question"]
-            current_question = int(current_question) + 1
-            if (current_question >= len(questions_list)):
-                await callback_query.message.edit_text(text="Wait please...")
+            current_question = int(data["current_question"]) + 1
+
+            if current_question >= len(questions_list):
+                async with WaitDots(self.bot, callback_query.from_user.id, "Wait please"):
+                    def _compute():
+                        user_answers = self.redis_client.get_user_symptoms(user_id=callback_query.from_user.id)
+                        ua_json = answers_to_json(user_answers)
+                        req = Requester(client=self.openai_client)
+                        parser = Parser()
+                        parsed_local = parser.parse(req.send(user_request=ua_json))
+                        print(parsed_local)
+                        return parsed_local
+
+                    parsed = await asyncio.to_thread(_compute)
+
+                    await send_assessment_en(self.bot, callback_query.from_user.id, parsed)
+                    doctors: list[Doctor] = await self.res_inst.find_doctors(
+                        parsed["diagnoses"], user_id=callback_query.from_user.id
+                    )
+
+                    post_handler = PostHandler(bot=self.bot)
+                    await post_handler.handle_post_symptoms(doctors=doctors, user_id=callback_query.from_user.id)
                 return
-            self.redis_client.set_user_symptoms(user_id=callback_query.from_user.id,
-                                                symptom_key=questions_list[current_question],
-                                                user_choose="idk")
+
+            self.redis_client.set_user_symptoms(
+                user_id=callback_query.from_user.id,
+                symptom_key=questions_list[current_question],
+                user_choose="idk"
+            )
             await state.update_data(current_question=str(current_question))
-            prev_message_id = data["message_id"]
-            await callback_query.message.edit_text(text=f"{questions_list[current_question]}",
-                                                   reply_markup=_qa_keyboard(current_question))
+            await callback_query.message.edit_text(
+                text=f"{questions_list[current_question]}",
+                reply_markup=_qa_keyboard(current_question)
+            )
