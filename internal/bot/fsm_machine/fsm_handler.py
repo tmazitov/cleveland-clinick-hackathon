@@ -11,12 +11,14 @@ from aiogram import F
 from internal.services.sp_2_tx.sp_2_tx import *
 import tempfile
 from aiogram.types import InlineKeyboardMarkup
+from internal.bot.waiting import WaitDots
 
 
 class FSMHandler:
-    def __init__(self, redis_client: RedisManager, openai_client: openai.OpenAI):
+    def __init__(self, redis_client: RedisManager, openai_client: openai.OpenAI, bot: Bot):
         self.redis_client = redis_client
         self.openai_client = openai_client
+        self.bot = bot
         self.rt = Router()
 
         def _qa_keyboard(symptom: str) -> InlineKeyboardMarkup:
@@ -67,70 +69,105 @@ class FSMHandler:
             if dst.stat().st_size == 0:
                 raise RuntimeError("[DL] downloaded file is empty")
 
-        # @self.rt.message(UserState.symptoms)
-        # async def handle_explained_sympthom(message: types.Message, state: FSMContext) -> None:
-        #     parser = Parser()
-        #     requester = Requester(client=self.openai_client)
-        #     text = "Okay, got you!\nLet me figure out your case and ask couple of additional questions..."
-        #     self.redis_client.set_user_explained(user_id=message.from_user.id, explained=message.text)
-        #     await message.answer(text=text)
-        #     await state.clear()
-        #     questions = parser.parse(requester.send(user_request=message.text))
-        #     questions_list = questions.get("questions", [])
-        #     if not questions_list:
-        #         await message.answer("Need more information from you!")
-        #         return
-        #     await state.update_data(questions=questions_list)
-        #     await state.update_data(current_question=str(0))
-        #     sent = await message.answer(f"{questions_list[0]}", reply_markup=_qa_keyboard(0))
-        #     await state.update_data(message_id=sent.message_id)
 
         @self.rt.message(
             UserState.symptoms,
             F.text | F.voice | F.audio | F.video_note
         )
         async def handle_explained_symptom(message: types.Message, state: FSMContext, bot: Bot) -> None:
-            await message.answer(
-                "Okay, got you!\nLet me figure out your case and ask couple of additional questions...")
+            # запуск анимации: это и будет «Okay, got you!...» с бегущими точками
+            async with WaitDots(self.bot, message.chat.id,
+                                "Okay, got you!\nLet me figure out your case and ask couple of additional questions"):
+                user_text = None
 
-            user_text = None
-            if message.text:
-                user_text = message.text.strip()
-            else:
-                stt = SpeechToText(client=self.openai_client)
-                with tempfile.TemporaryDirectory() as td:
-                    td = Path(td)
-                    src = td / "input.bin"
-                    wav = td / "input.wav"
-                    await _download_media_to(bot, message, src)
-                    await _run_ffmpeg_to_wav(src, wav)
+                # 1) получаем текст от пользователя
+                if message.text:
+                    user_text = message.text.strip()
+                else:
+                    stt = SpeechToText(client=self.openai_client)
+                    with tempfile.TemporaryDirectory() as td:
+                        td = Path(td)
+                        src = td / "input.bin"
+                        wav = td / "input.wav"
 
-                    def _do_stt():
-                        return stt.transcribe(str(wav))
-                    print(_do_stt())
-                    user_text = await asyncio.to_thread(_do_stt)
+                        await _download_media_to(bot, message, src)
+                        await _run_ffmpeg_to_wav(src, wav)
 
-            if not user_text:
-                await message.answer("I couldn't get your message. Please try again.")
-                return
+                        # НЕ вызываем _do_stt() напрямую — только через to_thread
+                        user_text = await asyncio.to_thread(stt.transcribe, str(wav))
 
-            self.redis_client.set_user_explained(user_id=message.from_user.id, explained=user_text)
+                if not user_text:
+                    # выйдем из контекста (анимация остановится) и ответим ошибкой
+                    await message.answer("I couldn't get your message. Please try again.")
+                    return
 
-            parser = Parser()
-            requester = Requester(client=self.openai_client)
+                # 2) сохраняем описание и получаем вопросы от модели (синхронное — в to_thread)
+                self.redis_client.set_user_explained(user_id=message.from_user.id, explained=user_text)
 
-            def _ask_model():
-                return parser.parse(requester.send(user_request=user_text))
+                parser = Parser()
+                requester = Requester(client=self.openai_client)
 
-            result = await asyncio.to_thread(_ask_model)
-            questions_list = result.get("questions", []) or []
+                def _ask_model():
+                    return parser.parse(requester.send(user_request=user_text))
 
-            await state.clear()
+                result = await asyncio.to_thread(_ask_model)
+                questions_list = result.get("questions", []) or []
 
-            if not questions_list:
-                await message.answer("Need more information from you!")
-                return
+                await state.clear()
 
-            await state.update_data(questions=questions_list, current_question="0")
-            sent = await message.answer(questions_list[0], reply_markup=_qa_keyboard(0))
-            await state.update_data(message_id=sent.message_id)
+                if not questions_list:
+                    await message.answer("Need more information from you!")
+                    return
+
+                await state.update_data(questions=questions_list, current_question="0")
+                sent = await message.answer(questions_list[0], reply_markup=_qa_keyboard(0))
+                await state.update_data(message_id=sent.message_id)
+
+
+
+
+        # async def handle_explained_symptom(message: types.Message, state: FSMContext, bot: Bot) -> None:
+        #     await message.answer(
+        #         "Okay, got you!\nLet me figure out your case and ask couple of additional questions...")
+        #
+        #     user_text = None
+        #     if message.text:
+        #         user_text = message.text.strip()
+        #     else:
+        #         stt = SpeechToText(client=self.openai_client)
+        #         with tempfile.TemporaryDirectory() as td:
+        #             td = Path(td)
+        #             src = td / "input.bin"
+        #             wav = td / "input.wav"
+        #             await _download_media_to(bot, message, src)
+        #             await _run_ffmpeg_to_wav(src, wav)
+        #
+        #             def _do_stt():
+        #                 return stt.transcribe(str(wav))
+        #             print(_do_stt())
+        #             user_text = await asyncio.to_thread(_do_stt)
+        #
+        #     if not user_text:
+        #         await message.answer("I couldn't get your message. Please try again.")
+        #         return
+        #
+        #     self.redis_client.set_user_explained(user_id=message.from_user.id, explained=user_text)
+        #
+        #     parser = Parser()
+        #     requester = Requester(client=self.openai_client)
+        #
+        #     def _ask_model():
+        #         return parser.parse(requester.send(user_request=user_text))
+        #
+        #     result = await asyncio.to_thread(_ask_model)
+        #     questions_list = result.get("questions", []) or []
+        #
+        #     await state.clear()
+        #
+        #     if not questions_list:
+        #         await message.answer("Need more information from you!")
+        #         return
+        #
+        #     await state.update_data(questions=questions_list, current_question="0")
+        #     sent = await message.answer(questions_list[0], reply_markup=_qa_keyboard(0))
+        #     await state.update_data(message_id=sent.message_id)

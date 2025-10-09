@@ -42,7 +42,7 @@ async def main() -> None:
     voice_handler = VoiceHandler(bot=bot)
     db_instance = Database()
     result_inst = Result(client=openai_client, db=db_instance)
-    FSM_handler = FSMHandler(redis_client=redis_client, openai_client=openai_client)
+    FSM_handler = FSMHandler(redis_client=redis_client, openai_client=openai_client, bot=bot)
     ComManager = CommandsManager(redis_client=redis_client)
     symptoms_asker = SymptomsAsker(redis_client=redis_client, bot=bot, openai_client=openai_client, res_inst=result_inst)
     dp.include_routers(ComManager.rt, img_handler.rt, voice_handler.rt, symptoms_asker.rt, FSM_handler.rt)
