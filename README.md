@@ -1,4 +1,4 @@
-# Clevlend Clinic Bot
+# Mr. Cleve Bot
 
 This project serves as a Telegram Bot that is aimed to enhance patients' experiences during their treatment and recovery in the clinic.
 
